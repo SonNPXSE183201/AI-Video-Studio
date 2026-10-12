@@ -302,6 +302,9 @@ const SingleScene: React.FC<{
     extrapolateRight: "clamp",
   });
 
+  const sceneProgress = frame / durationInFrames;
+  const activePhrase = getActiveSubtitlePhrase(scene.subtitle || scene.title, sceneProgress);
+
   return (
     <AbsoluteFill style={{ opacity, overflow: "hidden", backgroundColor: "#06080d" }}>
       <div
@@ -341,54 +344,60 @@ const SingleScene: React.FC<{
         }}
       />
 
-      {/* Subtitle Banner if enabled */}
+      {/* Dynamic Timed Subtitle Badge (Compact & Progressive) */}
       {showSubtitle && (
         <div
           style={{
             position: "absolute",
             bottom: 44,
-            left: 48,
-            right: 48,
+            left: "50%",
+            transform: `translateX(-50%) translateY(${titleY}px)`,
+            maxWidth: "85%",
+            width: "auto",
             opacity: textOpacity,
-            transform: `translateY(${titleY}px)`,
             pointerEvents: "none",
           }}
         >
           <div
             style={{
-              background: "rgba(7, 10, 20, 0.88)",
-              padding: "20px 32px",
-              borderRadius: 18,
-              border: "1px solid rgba(255, 215, 0, 0.28)",
+              background: "rgba(6, 9, 18, 0.88)",
+              padding: "12px 28px",
+              borderRadius: 20,
+              border: "1px solid rgba(255, 185, 81, 0.35)",
               backdropFilter: "blur(16px)",
-              boxShadow: "0 16px 40px rgba(0, 0, 0, 0.6)",
+              boxShadow: "0 16px 40px rgba(0, 0, 0, 0.75)",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
             }}
           >
             <div
               style={{
                 color: "#fbbf24",
-                fontSize: 26,
+                fontSize: 15,
                 fontWeight: 900,
                 letterSpacing: 1.2,
-                marginBottom: 8,
                 textTransform: "uppercase",
                 textShadow: "0 2px 10px rgba(251, 191, 36, 0.4)",
                 fontFamily: "'Segoe UI', Roboto, sans-serif",
+                opacity: 0.9,
               }}
             >
               {scene.title}
             </div>
             <div
               style={{
-                color: "#f8fafc",
-                fontSize: 20,
-                lineHeight: 1.5,
-                fontWeight: 500,
+                color: "#ffffff",
+                fontSize: 22,
+                lineHeight: 1.4,
+                fontWeight: 600,
                 fontFamily: "'Segoe UI', Roboto, sans-serif",
-                textShadow: "0 2px 8px rgba(0, 0, 0, 0.8)",
+                textShadow: "0 2px 8px rgba(0, 0, 0, 0.9)",
               }}
             >
-              {scene.subtitle}
+              {activePhrase}
             </div>
           </div>
         </div>
@@ -396,6 +405,56 @@ const SingleScene: React.FC<{
     </AbsoluteFill>
   );
 };
+
+// Helper: Split subtitle into natural reading phrases for progressive display
+export function splitSubtitleIntoPhrases(text: string): string[] {
+  if (!text || !text.trim()) return [];
+  const rawSegments = text.split(/(?<=[.!?…])\s+|—|–/g).map((s) => s.trim()).filter(Boolean);
+  const phrases: string[] = [];
+  for (const seg of rawSegments) {
+    const words = seg.split(/\s+/);
+    if (words.length <= 9) {
+      phrases.push(seg);
+    } else {
+      const commaParts = seg.split(/(?<=[,;])\s+/).map((p) => p.trim()).filter(Boolean);
+      if (commaParts.length > 1 && commaParts.every((p) => p.split(/\s+/).length <= 11)) {
+        commaParts.forEach((p) => phrases.push(p));
+      } else {
+        let current: string[] = [];
+        for (let i = 0; i < words.length; i++) {
+          current.push(words[i]);
+          if (current.length >= 7 && i < words.length - 1) {
+            phrases.push(current.join(" "));
+            current = [];
+          }
+        }
+        if (current.length > 0) phrases.push(current.join(" "));
+      }
+    }
+  }
+  return phrases.length > 0 ? phrases : [text];
+}
+
+// Helper: Get active subtitle phrase at current scene progress (0 to 1)
+export function getActiveSubtitlePhrase(text: string, sceneProgress: number): string {
+  const phrases = splitSubtitleIntoPhrases(text);
+  if (phrases.length <= 1) return phrases[0] || "";
+
+  const lengths = phrases.map((p) => Math.max(1, p.split(/\s+/).length));
+  const total = lengths.reduce((a, b) => a + b, 0);
+
+  let accumulated = 0;
+  const clampedProgress = Math.max(0, Math.min(0.999, sceneProgress));
+  for (let i = 0; i < phrases.length; i++) {
+    const start = accumulated / total;
+    const end = (accumulated + lengths[i]) / total;
+    if (clampedProgress >= start && clampedProgress < end) {
+      return phrases[i];
+    }
+    accumulated += lengths[i];
+  }
+  return phrases[phrases.length - 1];
+}
 
 export const TruongKhacVideo: React.FC<VideoProjectProps> = (props) => {
   const frame = useCurrentFrame();

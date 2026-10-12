@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Donghua Video Studio - Trương Khác (Quan Lộ Thương Đồ)</title>
+  <link rel="icon" type="image/jpeg" href="logo.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -18,7 +19,7 @@
   <header class="app-header">
     <div class="header-left">
       <div class="logo-badge">
-        <span class="logo-icon">⚡</span>
+        <img src="logo.jpg" alt="AI Video Studio Logo" class="logo-icon-img" id="appLogoImg" />
         <div>
           <h1 class="logo-title">AI VIDEO STUDIO</h1>
           <span class="logo-sub">Trọng Sinh 1994 · Trương Khác (Quan Lộ Thương Đồ)</span>
@@ -258,6 +259,13 @@
               <span id="voiceFileName">voice.mp3</span>
               <button id="removeVoiceBtn" class="btn-remove">×</button>
             </div>
+            <button type="button" id="syncSceneDurationsBtn" class="btn-mini btn-mini-secondary" style="margin-top: 8px; width: 100%; justify-content: center; height: 32px;" title="Tự động chia đều/khớp thời lượng các phân cảnh chuẩn 100% theo độ dài audio giọng đọc">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              Khớp Thời Lượng Cảnh Theo Audio
+            </button>
           </div>
 
           <div class="slider-control">

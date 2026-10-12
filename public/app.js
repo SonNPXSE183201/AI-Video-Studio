@@ -255,6 +255,7 @@ class StudioApp {
       this.audioVoice.volume = vol;
       document.getElementById("voiceVolVal").textContent = `${Math.round(vol * 100)}%`;
     });
+    document.getElementById("syncSceneDurationsBtn")?.addEventListener("click", () => this.syncSceneDurationsWithAudio());
 
     document.getElementById("uploadBgmBtn").addEventListener("click", () => {
       document.getElementById("bgmFileInput").click();
@@ -919,20 +920,39 @@ class StudioApp {
     }
 
     try {
+      const payload = {
+        engine: engine,
+        voice: voice,
+        apiKey: apiKey,
+      };
+
+      if (textSource === "scenes") {
+        payload.scenes = this.project.scenes;
+      } else {
+        payload.text = textToSpeak;
+      }
+
       const res = await fetch("/api/tts/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: textToSpeak,
-          engine: engine,
-          voice: voice,
-          apiKey: apiKey,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (!data.success) {
         throw new Error(data.error || "Không thể tạo giọng đọc");
+      }
+
+      // If scene durations returned, auto-synchronize all scene durations
+      if (data.sceneDurations && data.sceneDurations.length > 0) {
+        data.sceneDurations.forEach((dur, i) => {
+          if (this.project.scenes[i]) {
+            this.project.scenes[i].durationSeconds = dur;
+          }
+        });
+        this.calculateTotalDuration();
+        this.renderScenesList();
+        this.renderFrame(this.currentTime);
       }
 
       // Success: attach to project and audio player
@@ -944,7 +964,11 @@ class StudioApp {
         statusMsg.style.color = "#4ade80";
         statusMsg.textContent = `✅ Đã tạo giọng đọc thành công (${data.filename})!`;
       }
-      this.showToast("🎙️ Đã tạo giọng đọc AI thành công và gán vào video!");
+      this.showToast(
+        data.sceneDurations
+          ? `🎙️ Đã tạo giọng đọc & tự động khớp ${data.sceneDurations.length} phân cảnh (${data.totalDuration?.toFixed(1) || ""}s)!`
+          : "🎙️ Đã tạo giọng đọc AI thành công và gán vào video!"
+      );
 
       // Auto play short preview if wanted
       if (this.audioVoice) {
@@ -967,6 +991,105 @@ class StudioApp {
         generateBtn.style.opacity = "1";
       }
     }
+  }
+
+  // Synchronize scene durations proportionally to current voice audio duration
+  async syncSceneDurationsWithAudio() {
+    if (!this.project.voiceAudioUrl) {
+      alert("Chưa có file giọng đọc! Vui lòng tạo giọng đọc AI hoặc tải lên file giọng đọc trước.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/audio/duration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relativePath: this.project.voiceAudioUrl }),
+      });
+      const data = await res.json();
+      if (!data.success || !data.duration || data.duration <= 0) {
+        throw new Error("Không thể xác định độ dài audio");
+      }
+
+      const totalAudioDur = data.duration;
+      const scenes = this.project.scenes;
+      if (!scenes || scenes.length === 0) return;
+
+      // Calculate weight by word length of subtitle/title
+      const wordCounts = scenes.map((s) => {
+        const txt = (s.subtitle || s.title || "").trim();
+        return Math.max(3, txt ? txt.split(/\s+/).length : 5);
+      });
+      const totalWords = wordCounts.reduce((a, b) => a + b, 0);
+
+      let allocatedSum = 0;
+      scenes.forEach((s, i) => {
+        if (i === scenes.length - 1) {
+          s.durationSeconds = Math.max(2, Math.round((totalAudioDur - allocatedSum) * 10) / 10);
+        } else {
+          const dur = Math.max(2, Math.round((totalAudioDur * (wordCounts[i] / totalWords)) * 10) / 10);
+          s.durationSeconds = dur;
+          allocatedSum += dur;
+        }
+      });
+
+      this.calculateTotalDuration();
+      this.renderScenesList();
+      this.renderFrame(this.currentTime);
+      this.saveProject();
+      this.showToast(`⏱️ Đã tự động khớp toàn bộ ${scenes.length} cảnh theo audio (${totalAudioDur.toFixed(1)}s)!`);
+    } catch (e) {
+      alert("Lỗi khi đồng bộ thời lượng: " + e.message);
+    }
+  }
+
+  // Dynamic Subtitle Helpers: Split subtitle into natural reading phrases for timed display
+  splitSubtitleIntoPhrases(text) {
+    if (!text || !text.trim()) return [];
+    const rawSegments = text.split(/(?<=[.!?…])\s+|—|–/g).map((s) => s.trim()).filter(Boolean);
+    const phrases = [];
+    for (const seg of rawSegments) {
+      const words = seg.split(/\s+/);
+      if (words.length <= 9) {
+        phrases.push(seg);
+      } else {
+        const commaParts = seg.split(/(?<=[,;])\s+/).map((p) => p.trim()).filter(Boolean);
+        if (commaParts.length > 1 && commaParts.every((p) => p.split(/\s+/).length <= 11)) {
+          commaParts.forEach((p) => phrases.push(p));
+        } else {
+          let current = [];
+          for (let i = 0; i < words.length; i++) {
+            current.push(words[i]);
+            if (current.length >= 7 && i < words.length - 1) {
+              phrases.push(current.join(" "));
+              current = [];
+            }
+          }
+          if (current.length > 0) phrases.push(current.join(" "));
+        }
+      }
+    }
+    return phrases.length > 0 ? phrases : [text];
+  }
+
+  getActiveSubtitlePhrase(text, sceneProgress) {
+    const phrases = this.splitSubtitleIntoPhrases(text);
+    if (phrases.length <= 1) return phrases[0] || "";
+
+    const lengths = phrases.map((p) => Math.max(1, p.split(/\s+/).length));
+    const total = lengths.reduce((a, b) => a + b, 0);
+
+    let accumulated = 0;
+    const clampedProgress = Math.max(0, Math.min(0.999, sceneProgress));
+    for (let i = 0; i < phrases.length; i++) {
+      const start = accumulated / total;
+      const end = (accumulated + lengths[i]) / total;
+      if (clampedProgress >= start && clampedProgress < end) {
+        return phrases[i];
+      }
+      accumulated += lengths[i];
+    }
+    return phrases[phrases.length - 1];
   }
 
   // Google Gemini API Key Manager Logic
@@ -1375,10 +1498,11 @@ class StudioApp {
       card.classList.toggle("active-scene", idx === index);
     });
 
-    // Update Label
+    // Update Label & Timed Progressive Subtitle
     this.currentSceneLabel.textContent = `CẢNH ${String(index + 1).padStart(2, "0")}: ${scene.title}`;
+    const activePhrase = this.getActiveSubtitlePhrase(scene.subtitle || scene.title, sceneProgress);
     this.liveSubTitle.textContent = scene.title;
-    this.liveSubText.textContent = scene.subtitle;
+    this.liveSubText.textContent = activePhrase;
 
     // Progress Bar
     const totalProg = (time / this.totalDuration) * 100;

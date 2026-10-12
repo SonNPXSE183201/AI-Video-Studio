@@ -3,7 +3,7 @@ import cors from "cors";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { GoogleGenAI } from "@google/genai";
@@ -237,12 +237,140 @@ async function generateGeminiTts(text, apiKey, voice = "Puck") {
   };
 }
 
-// API: Generate AI Voice
+// Helper: Get audio duration in seconds via ffprobe
+function getAudioDuration(filePath) {
+  return new Promise((resolve) => {
+    execFile(
+      "ffprobe",
+      ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath],
+      (err, stdout) => {
+        if (err) {
+          console.warn("[FFPROBE WARN]", err.message);
+          return resolve(5.0);
+        }
+        const dur = parseFloat(stdout.trim());
+        resolve(isNaN(dur) ? 5.0 : dur);
+      }
+    );
+  });
+}
+
+// Helper: Pad silence at end of audio file via ffmpeg
+function padAudioSilence(inputPath, outputPath, padSeconds = 0.4) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffmpeg",
+      ["-y", "-i", inputPath, "-af", `apad=pad_dur=${padSeconds}`, outputPath],
+      (err) => {
+        if (err) return reject(err);
+        resolve(outputPath);
+      }
+    );
+  });
+}
+
+// Helper: Concat multiple audio files via ffmpeg
+function concatAudioFiles(filePaths, outputPath) {
+  return new Promise((resolve, reject) => {
+    const listFile = path.join(uploadDir, `concat_${Date.now()}_${Math.random().toString(36).substring(7)}.txt`);
+    const content = filePaths.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n");
+    fs.writeFileSync(listFile, content, "utf-8");
+
+    execFile(
+      "ffmpeg",
+      ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", outputPath],
+      (err) => {
+        if (err) {
+          // Fallback with re-encoding
+          execFile(
+            "ffmpeg",
+            ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c:a", "libmp3lame", "-b:a", "192k", outputPath],
+            (err2) => {
+              fs.unlink(listFile, () => {});
+              if (err2) return reject(err2);
+              resolve(outputPath);
+            }
+          );
+        } else {
+          fs.unlink(listFile, () => {});
+          resolve(outputPath);
+        }
+      }
+    );
+  });
+}
+
+// API: Generate AI Voice (Synchronized with Scene Durations)
 app.post("/api/tts/generate", async (req, res) => {
   try {
-    const { engine = "edge", voice = "vi-VN-NamMinhNeural", text, geminiApiKey, apiKey, rate = "+0%" } = req.body;
+    const { engine = "edge", voice = "vi-VN-NamMinhNeural", text, scenes, geminiApiKey, apiKey, rate = "+0%" } = req.body;
     const resolvedApiKey = geminiApiKey || apiKey || process.env.GEMINI_API_KEY;
 
+    // SCENE-SYNCHRONIZED MODE: Generate audio per scene and align durations
+    if (scenes && Array.isArray(scenes) && scenes.length > 0) {
+      console.log(`[TTS] Generating voice synchronized for ${scenes.length} scenes...`);
+      const paddedFiles = [];
+      const tempFiles = [];
+      const sceneDurations = [];
+
+      for (let i = 0; i < scenes.length; i++) {
+        const sc = scenes[i];
+        const sceneText = (sc.subtitle || sc.title || "").trim();
+        if (!sceneText) {
+          sceneDurations.push(sc.durationSeconds || 5);
+          continue;
+        }
+
+        let segment;
+        if (engine === "gemini") {
+          const geminiVoice = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"].includes(voice) ? voice : "Puck";
+          segment = await generateGeminiTts(sceneText, resolvedApiKey, geminiVoice);
+        } else {
+          segment = await generateEdgeTts(sceneText, voice, rate);
+        }
+
+        const rawFilePath = path.join(__dirname, "public", segment.relativePath);
+        tempFiles.push(rawFilePath);
+
+        const rawDur = await getAudioDuration(rawFilePath);
+        // Add 0.4s natural breathing space between scenes
+        const targetSceneDur = Math.max(2, Math.round((rawDur + 0.4) * 10) / 10);
+        sceneDurations.push(targetSceneDur);
+
+        // Pad audio with 0.4s silence to match targetSceneDur
+        const paddedName = `padded_${Date.now()}_${i}.mp3`;
+        const paddedFilePath = path.join(uploadDir, paddedName);
+        tempFiles.push(paddedFilePath);
+
+        await padAudioSilence(rawFilePath, paddedFilePath, 0.4);
+        paddedFiles.push(paddedFilePath);
+      }
+
+      // Concat all padded segments into final master voice audio
+      const masterFilename = `voice_synced_${Date.now()}.mp3`;
+      const masterFilePath = path.join(uploadDir, masterFilename);
+
+      if (paddedFiles.length > 0) {
+        await concatAudioFiles(paddedFiles, masterFilePath);
+      }
+
+      // Cleanup temporary chunk files
+      tempFiles.forEach((f) => fs.unlink(f, () => {}));
+
+      const totalDur = sceneDurations.reduce((a, b) => a + b, 0);
+
+      return res.json({
+        success: true,
+        message: `Đã tạo giọng đọc và tự động khớp ${scenes.length} phân cảnh!`,
+        filename: masterFilename,
+        relativePath: `uploads/${masterFilename}`,
+        url: `/uploads/${masterFilename}`,
+        sceneDurations,
+        totalDuration: totalDur,
+      });
+    }
+
+    // SINGLE TEXT MODE
     if (!text || text.trim().length === 0) {
       return res.status(400).json({ error: "Vui lòng nhập văn bản kịch bản cần đọc!" });
     }
@@ -257,14 +385,32 @@ app.post("/api/tts/generate", async (req, res) => {
       result = await generateEdgeTts(text, voice, rate);
     }
 
+    const fullPath = path.join(__dirname, "public", result.relativePath);
+    const audioDur = await getAudioDuration(fullPath);
+
     res.json({
       success: true,
       message: "Tạo giọng đọc AI thành công!",
+      duration: audioDur,
       ...result,
     });
   } catch (error) {
     console.error("[TTS ERROR]", error);
     res.status(500).json({ error: error.message || "Lỗi tạo giọng đọc AI" });
+  }
+});
+
+// API: Get Audio File Duration
+app.post("/api/audio/duration", async (req, res) => {
+  try {
+    const { relativePath } = req.body;
+    if (!relativePath) return res.status(400).json({ error: "Thiếu đường dẫn relativePath" });
+    const fullPath = path.join(__dirname, "public", relativePath);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "Không tìm thấy file audio" });
+    const duration = await getAudioDuration(fullPath);
+    res.json({ success: true, duration });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
