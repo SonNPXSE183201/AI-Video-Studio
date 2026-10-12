@@ -1,0 +1,35 @@
+{
+  "name": "picket-social-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "node server.js",
+    "start": "node server.js",
+    "remotion": "remotion studio src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "render": "remotion render src/index.ts TruongKhacCinematic out/truong-khac-1p30s.mp4 --codec h264 --pixel-format yuv420p --concurrency 1",
+    "render:vertical": "remotion render src/index.ts TruongKhacVertical out/truong-khac-vertical-1p30s.mp4 --codec h264 --pixel-format yuv420p --concurrency 1",
+    "check": "npm run typecheck"
+  },
+  "dependencies": {
+    "@google/genai": "^2.28.0",
+    "@remotion/cli": "4.0.529",
+    "@remotion/player": "^4.0.529",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "msedge-tts": "^2.0.9",
+    "multer": "^2.4.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.529"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "title": "QUAN LỘ THƯƠNG ĐỒ · TRƯƠNG KHÁC",
+  "aspectRatio": "16:9",
+  "showTitleBadge": true,
+  "showSubtitle": true,
+  "showProgressBar": true,
+  "voiceAudioUrl": "uploads/voice_gemini_1791835182517.wav",
+  "voiceVolume": 1,
+  "bgmAudioUrl": "",
+  "bgmVolume": 0.25,
+  "scenes": [
+    {
+      "id": 1,
+      "title": "KHOẢNH KHẮC THỨC TỈNH 1994",
+      "subtitle": "Mở mắt tại lớp học THCS Dương Xá — Trí tuệ 30 năm sau thức tỉnh trong thân xác thiếu niên 16 tuổi.",
+      "prompt": "Close-up shot of Trương Khác waking up at a wooden desk in a retro 1994 classroom labeled 'THCS DƯƠNG XÁ'...",
+      "image": "truong-khac/scene_01.jpg",
+      "durationSeconds": 6,
+      "camera": "pushIn"
+    },
+    {
+      "id": 1791838610932,
+      "title": "CẢNH MỚI 20",
+      "subtitle": "Nhập nội dung phụ đề cho cảnh mới...",
+      "prompt": "Cinematic 2.5D Chinese anime-realism donghua...",
+      "image": "truong-khac/scene_01.jpg",
+      "durationSeconds": 6,
+      "camera": "pushIn"
+    }
+  ]
+}
